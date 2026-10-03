@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Nextcloud Calendar into the Omarchy calendar widget
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Keep a predictable PATH for Python and system utilities.
+Environment=PATH=%h/.local/bin:%h/.cache/.bun/bin:%h/.bun/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.config/omarchy/plugins/david.nextcloud-calendar/sync/omarchy-calendar-sync
+# A failed run is deliberately allowed to surface as a failed unit. The
+# sync leaves the previous events file intact either way, and a user
+# needs `systemctl --user status` to show that something is wrong.

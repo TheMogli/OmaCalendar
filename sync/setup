@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG="$HOME/.config/omarchy/nextcloud-calendar.json"
+SECRET="$HOME/.config/omarchy/nextcloud-calendar.secret"
+UNIT_DIR="$HOME/.config/systemd/user"
+
+if [ ! -t 0 ]; then
+  echo "Run this setup script in a terminal so it can securely prompt for credentials." >&2
+  exit 1
+fi
+
+printf 'Nextcloud URL (for example https://cloud.example.com): '
+read -r server
+printf 'Nextcloud username: '
+read -r username
+printf 'Nextcloud app password (input hidden): '
+read -rs password
+printf '\n'
+
+case "$server" in https://*) ;; *) echo "The Nextcloud URL must use https://" >&2; exit 1;; esac
+[ -n "$username" ] && [ -n "$password" ] || { echo "Username and app password are required." >&2; exit 1; }
+
+mkdir -p "$(dirname "$CONFIG")" "$UNIT_DIR"
+umask 077
+printf '%s' "$password" > "$SECRET"
+python3 - "$CONFIG" "$server" "$username" "$SECRET" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+current = json.loads(path.read_text()) if path.exists() else {}
+current.update({"server": sys.argv[2].rstrip("/"), "username": sys.argv[3], "passwordFile": sys.argv[4]})
+current.setdefault("calendars", {"include": [], "exclude": []})
+current.setdefault("window", {"pastDays": 7, "futureDays": 60})
+path.write_text(json.dumps(current, indent=2) + "\n")
+PY
+
+"$SCRIPT_DIR/omarchy-calendar-sync"
+cp "$SCRIPT_DIR/systemd/omarchy-calendar-sync.service" "$UNIT_DIR/nextcloud-calendar-sync.service"
+cp "$SCRIPT_DIR/systemd/omarchy-calendar-sync.timer" "$UNIT_DIR/nextcloud-calendar-sync.timer"
+sed -i "s|^ExecStart=.*|ExecStart=$SCRIPT_DIR/omarchy-calendar-sync|" "$UNIT_DIR/nextcloud-calendar-sync.service"
+systemctl --user daemon-reload
+systemctl --user enable --now nextcloud-calendar-sync.timer
+
+echo
+echo "Nextcloud calendar sync is ready. Events refresh every five minutes."
+echo "Logs: journalctl --user -u nextcloud-calendar-sync"

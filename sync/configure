@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Persist UI-supplied Nextcloud settings, verify them, and enable syncing."""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = Path.home() / ".config" / "omarchy" / "nextcloud-calendar.json"
+SECRET = Path.home() / ".config" / "omarchy" / "nextcloud-calendar.secret"
+UNITS = Path.home() / ".config" / "systemd" / "user"
+
+
+def atomic_write(path, content, mode=0o600):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def main():
+    try:
+        request = json.load(sys.stdin)
+        server = str(request.get("server", "")).strip().rstrip("/")
+        username = str(request.get("username", "")).strip()
+        password = str(request.get("password", ""))
+        if not server.startswith("https://"):
+            raise ValueError("Nextcloud URL must start with https://")
+        if not username:
+            raise ValueError("Username is required")
+        if not password and not SECRET.exists():
+            raise ValueError("App password is required the first time")
+
+        old_config_bytes = CONFIG.read_bytes() if CONFIG.exists() else None
+        old_secret_bytes = SECRET.read_bytes() if SECRET.exists() else None
+        old = json.loads(old_config_bytes) if old_config_bytes else {}
+        config = {
+            "server": server,
+            "username": username,
+            "passwordFile": str(SECRET),
+            "calendars": old.get("calendars", {"include": [], "exclude": []}),
+            "window": old.get("window", {"pastDays": 7, "futureDays": 60}),
+        }
+        if password:
+            atomic_write(SECRET, password, 0o600)
+        atomic_write(CONFIG, json.dumps(config, indent=2) + "\n", 0o600)
+
+        sync = subprocess.run([str(ROOT / "omarchy-calendar-sync")], text=True, capture_output=True)
+        if sync.returncode:
+            if old_config_bytes is None:
+                CONFIG.unlink(missing_ok=True)
+            else:
+                atomic_write(CONFIG, old_config_bytes.decode(), 0o600)
+            if old_secret_bytes is None:
+                SECRET.unlink(missing_ok=True)
+            else:
+                atomic_write(SECRET, old_secret_bytes.decode(), 0o600)
+            raise RuntimeError(sync.stderr.strip() or "Nextcloud connection failed")
+
+        UNITS.mkdir(parents=True, exist_ok=True)
+        service = (ROOT / "systemd" / "omarchy-calendar-sync.service").read_text()
+        service_lines = [f"ExecStart={ROOT / 'omarchy-calendar-sync'}" if line.startswith("ExecStart=") else line for line in service.splitlines()]
+        atomic_write(UNITS / "nextcloud-calendar-sync.service", "\n".join(service_lines) + "\n", 0o644)
+        atomic_write(UNITS / "nextcloud-calendar-sync.timer", (ROOT / "systemd" / "omarchy-calendar-sync.timer").read_text(), 0o644)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "nextcloud-calendar-sync.timer"], check=True, capture_output=True)
+        print("Connected. Calendar events were synced successfully.")
+        return 0
+    except (ValueError, OSError, json.JSONDecodeError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

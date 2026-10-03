@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "id": "david.nextcloud-calendar",
+  "name": "Nextcloud Calendar",
+  "version": "0.2.1",
+  "author": "David / tmn73",
+  "license": "MIT",
+  "description": "Your Nextcloud calendars in the Omarchy bar, with agenda and meeting links.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Nextcloud Calendar",
+    "description": "Your Nextcloud calendars in the Omarchy bar, with agenda and meeting links.",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaults": {
+      "format": "dddd HH:mm",
+      "formatAlt": "d MMMM 'W'ww yyyy",
+      "verticalFormat": "HH\n-\nmm"
+    },
+    "schema": [
+      {
+        "key": "format",
+        "type": "string",
+        "label": "Date format",
+        "defaultValue": "dddd HH:mm"
+      },
+      {
+        "key": "formatAlt",
+        "type": "string",
+        "label": "Alternate format",
+        "defaultValue": "d MMMM 'W'ww yyyy"
+      },
+      {
+        "key": "verticalFormat",
+        "type": "string",
+        "label": "Vertical bar format",
+        "defaultValue": "HH\n-\nmm"
+      },
+      {
+        "key": "birthYear",
+        "type": "number",
+        "label": "Birth year",
+        "defaultValue": 0
+      },
+      {
+        "key": "lifeExpectancy",
+        "type": "number",
+        "label": "Life expectancy",
+        "defaultValue": 0
+      }
+    ]
+  }
+}
