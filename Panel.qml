@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -18,7 +19,9 @@ import "Model.js" as Model
 Panel {
   id: root
   moduleName: "david.nextcloud-calendar"
-  ipcTarget: "david.nextcloud-calendar"
+  // BarWidget.qml owns the IPC target; registering it here as well shadows
+  // the widget handler even when Panel's own IPC is disabled.
+  ipcTarget: ""
   manageIpc: false
 
   property var anchorItem: null
@@ -30,6 +33,41 @@ Panel {
   // slot up the same way.
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
+  property string focusAtOpen: ""
+  property bool hasFocusSnapshot: false
+
+  function focusedClientAddress() {
+    return Hyprland.activeToplevel ? String(Hyprland.activeToplevel.address) : ""
+  }
+
+  // Track the focused Hyprland client so Alt-Tab and other window switches
+  // dismiss the calendar as well as the KeyboardPanel's outside-click path.
+  onOpenedChanged: {
+    hasFocusSnapshot = opened
+    focusAtOpen = opened ? focusedClientAddress() : ""
+  }
+
+  Connections {
+    target: Hyprland
+    function onActiveToplevelChanged() {
+      if (root.opened && root.hasFocusSnapshot && root.focusedClientAddress() !== root.focusAtOpen)
+        root.close()
+    }
+    function onRawEvent(event) {
+      if (root.opened && event.name === "activewindow") root.close()
+    }
+  }
+
+  // Poll as well as listening for IPC changes: some Hyprland focus changes
+  // (notably workspace/window switchers) can coalesce active-toplevel events.
+  Timer {
+    interval: 100
+    repeat: true
+    running: root.opened && root.hasFocusSnapshot
+    onTriggered: {
+      if (root.focusedClientAddress() !== root.focusAtOpen) root.close()
+    }
+  }
 
   // ---- Today. SystemClock keeps this honest across midnight so the
   //      highlight rolls over without the panel being reopened.
@@ -383,8 +421,8 @@ Panel {
   // Summoning by hotkey moves no pointer, so a hover the bar was still
   // holding must not keep the center indicators revealed behind the panel.
   function setCenterHoverRevealSuppressed(value) {
-    if (root.bar && "centerHoverRevealSuppressed" in root.bar)
-      root.bar.centerHoverRevealSuppressed = value
+    if (root.bar && typeof root.bar.setCenterHoverRevealSuppressed === "function")
+      root.bar.setCenterHoverRevealSuppressed(value)
   }
 
   function refresh() {
